@@ -266,10 +266,6 @@ export abstract class AbstractTimeExpressionParser implements Parser {
             return null;
         }
 
-        if (hour >= 12) {
-            meridiem = Meridiem.PM;
-        }
-
         // ----- AM & PM
         if (match[AM_PM_HOUR_GROUP] != null) {
             if (hour > 12) {
@@ -293,17 +289,33 @@ export abstract class AbstractTimeExpressionParser implements Parser {
             }
 
             if (!result.start.isCertain("meridiem")) {
-                if (meridiem == Meridiem.AM) {
-                    result.start.imply("meridiem", Meridiem.AM);
-
-                    if (result.start.get("hour") == 12) {
-                        result.start.assign("hour", 0);
+                // The starting hour is ambiguous, so follow the ending's meridiem
+                // only when it keeps the range short and on the same day:
+                // "11 - 1pm" => 11am - 1pm, "10 - 2am" => 10pm - 2am.
+                const startHour = result.start.get("hour");
+                const sameSideHour =
+                    meridiem == Meridiem.PM
+                        ? startHour === 12
+                            ? 12
+                            : startHour + 12
+                        : startHour === 12
+                          ? 0
+                          : startHour;
+                if (sameSideHour < hour) {
+                    result.start.assign("meridiem", meridiem);
+                    if (meridiem == Meridiem.PM) {
+                        if (startHour != 12) {
+                            result.start.assign("hour", startHour + 12);
+                        }
+                    } else {
+                        if (startHour == 12) {
+                            result.start.assign("hour", 0);
+                        }
                     }
                 } else {
-                    result.start.imply("meridiem", Meridiem.PM);
-
-                    if (result.start.get("hour") != 12) {
-                        result.start.assign("hour", result.start.get("hour") + 12);
+                    result.start.imply("meridiem", meridiem == Meridiem.PM ? Meridiem.AM : Meridiem.PM);
+                    if (meridiem == Meridiem.AM && startHour != 12) {
+                        result.start.assign("hour", startHour + 12);
                     }
                 }
             }
@@ -314,23 +326,48 @@ export abstract class AbstractTimeExpressionParser implements Parser {
 
         if (meridiem >= 0) {
             components.assign("meridiem", meridiem);
+        } else if (hour > 12) {
+            // A bare 24-hour value, e.g. "10:00 - 21:45"
+            components.imply("meridiem", Meridiem.PM);
         } else {
-            const startAtPM = result.start.isCertain("meridiem") && result.start.get("hour") > 12;
-            if (startAtPM) {
-                if (result.start.get("hour") - 12 > hour) {
-                    // 10pm - 1 (am)
-                    components.imply("meridiem", Meridiem.AM);
-                } else if (hour <= 12) {
-                    components.assign("hour", hour + 12);
-                    components.assign("meridiem", Meridiem.PM);
+            if (result.start.isCertain("meridiem")) {
+                // Only the starting side has a meridiem hint (e.g. "9am - 5", "8pm - 11").
+                // Follow that hint whenever it keeps the range on the same day, otherwise
+                // the range crosses midnight (e.g. "11pm - 1").
+                const startHour = result.start.get("hour");
+                if (result.start.get("meridiem") == Meridiem.PM) {
+                    if (hour === 12 || startHour >= (hour === 12 ? 24 : hour + 12)) {
+                        // 10pm - 2 (am) or 9pm - 12 (midnight): crossing midnight
+                        if (hour === 12) {
+                            hour = 0;
+                        }
+                        components.assign("hour", hour);
+                        components.imply("meridiem", Meridiem.AM);
+                    } else {
+                        hour = hour + 12;
+                        components.assign("hour", hour);
+                        components.assign("meridiem", Meridiem.PM);
+                    }
+                } else {
+                    if (hour !== 12 && startHour < hour) {
+                        // 1am - 3 (am): still in the morning
+                        components.imply("meridiem", Meridiem.AM);
+                    } else {
+                        // 9am - 5 (pm): goes into the afternoon,
+                        // 11am - 12 stays at noon on the same day
+                        hour = hour === 12 ? 12 : hour + 12;
+                        components.assign("hour", hour);
+                        components.assign("meridiem", Meridiem.PM);
+                    }
                 }
-            } else if (hour > 12) {
-                components.imply("meridiem", Meridiem.PM);
-            } else if (hour <= 12) {
-                components.imply("meridiem", Meridiem.AM);
+            } else {
+                // No hint on either side, e.g. "7 - 8"; bare 12 stays at noon
+                components.imply("meridiem", hour === 12 ? Meridiem.PM : Meridiem.AM);
             }
         }
 
+        // The ending should never be before the starting on the same day;
+        // a smaller clock value means the range crosses midnight.
         if (components.date().getTime() < result.start.date().getTime()) {
             components.imply("day", components.get("day") + 1);
         }

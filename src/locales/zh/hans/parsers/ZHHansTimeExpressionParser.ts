@@ -333,9 +333,7 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
         if (hour > 24) {
             return null;
         }
-        if (hour >= 12) {
-            meridiem = 1;
-        }
+        meridiem = -1;
 
         // ----- AM & PM
         if (secondMatch[AM_PM_HOUR_GROUP]) {
@@ -352,17 +350,25 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
             }
 
             if (!result.start.isCertain("meridiem")) {
-                if (meridiem == 0) {
-                    result.start.imply("meridiem", 0);
-
-                    if (result.start.get("hour") == 12) {
-                        result.start.assign("hour", 0);
+                // 只有结束端带 am/pm（如 "1点pm到3点"），开始端在能形成当天短区间时顺着结束端取。
+                const startHour = result.start.get("hour");
+                const sameSideHour =
+                    meridiem == 1 ? (startHour === 12 ? 12 : startHour + 12) : startHour === 12 ? 0 : startHour;
+                if (sameSideHour < hour) {
+                    result.start.assign("meridiem", meridiem);
+                    if (meridiem == 1) {
+                        if (startHour != 12) {
+                            result.start.assign("hour", startHour + 12);
+                        }
+                    } else {
+                        if (startHour == 12) {
+                            result.start.assign("hour", 0);
+                        }
                     }
                 } else {
-                    result.start.imply("meridiem", 1);
-
-                    if (result.start.get("hour") != 12) {
-                        result.start.assign("hour", result.start.get("hour") + 12);
+                    result.start.imply("meridiem", meridiem == 1 ? 0 : 1);
+                    if (meridiem == 0 && startHour != 12) {
+                        result.start.assign("hour", startHour + 12);
                     }
                 }
             }
@@ -398,19 +404,75 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
             }
         }
 
+        if (
+            meridiem >= 0 &&
+            (secondMatch[ZH_AM_PM_HOUR_GROUP_1] ||
+                secondMatch[ZH_AM_PM_HOUR_GROUP_2] ||
+                secondMatch[ZH_AM_PM_HOUR_GROUP_3]) &&
+            !result.start.isCertain("meridiem")
+        ) {
+            // 只有结束端带上午/下午等词（如 "3点到下午5点"），开始端在能形成当天短区间时顺着结束端取。
+            const startHour = result.start.get("hour");
+            const sameSideHour =
+                meridiem == 1 ? (startHour === 12 ? 12 : startHour + 12) : startHour === 12 ? 0 : startHour;
+            if (sameSideHour < hour) {
+                result.start.assign("meridiem", meridiem);
+                if (meridiem == 1) {
+                    if (startHour != 12) {
+                        result.start.assign("hour", startHour + 12);
+                    }
+                } else {
+                    if (startHour == 12) {
+                        result.start.assign("hour", 0);
+                    }
+                }
+            } else {
+                result.start.imply("meridiem", meridiem == 1 ? 0 : 1);
+                if (meridiem == 0 && startHour != 12) {
+                    result.start.assign("hour", startHour + 12);
+                }
+            }
+        }
+
         result.text = result.text + secondMatch[0];
         result.end.assign("hour", hour);
         result.end.assign("minute", minute);
         if (meridiem >= 0) {
             result.end.assign("meridiem", meridiem);
-        } else {
-            const startAtPM = result.start.isCertain("meridiem") && result.start.get("meridiem") == 1;
-            if (startAtPM && result.start.get("hour") > hour) {
-                // 10pm - 1 (am)
-                result.end.imply("meridiem", 0);
-            } else if (hour > 12) {
-                result.end.imply("meridiem", 1);
+        } else if (hour > 12) {
+            // 24 小时制的裸钟点，如 "13点到21点"
+            result.end.imply("meridiem", 1);
+        } else if (result.start.isCertain("meridiem")) {
+            // 只有开始端带上下午等词（如 "下午3点到5点"、"上午10点到2点"），
+            // 结束端尽量顺着它取当天的时间，取不下时才跨到凌晨（如 "晚上11点到1点"）。
+            const startHour = result.start.get("hour");
+            if (result.start.get("meridiem") == 1) {
+                if (hour === 12 || startHour >= (hour === 12 ? 24 : hour + 12)) {
+                    // 晚上11点到1点：跨夜
+                    if (hour === 12) {
+                        hour = 0;
+                        result.end.assign("hour", hour);
+                    }
+                    result.end.imply("meridiem", 0);
+                } else {
+                    hour = hour + 12;
+                    result.end.assign("hour", hour);
+                    result.end.assign("meridiem", 1);
+                }
+            } else {
+                if (hour !== 12 && startHour < hour) {
+                    // 凌晨1点到3点：仍在上午
+                    result.end.imply("meridiem", 0);
+                } else {
+                    // 上午10点到2点：进入下午；上午11点到12点：当天中午
+                    hour = hour === 12 ? 12 : hour + 12;
+                    result.end.assign("hour", hour);
+                    result.end.assign("meridiem", 1);
+                }
             }
+        } else if (hour === 12) {
+            // 两端都没有上下午提示时，裸 12 点仍按中午
+            result.end.imply("meridiem", 1);
         }
 
         if (result.end.date().getTime() < result.start.date().getTime()) {

@@ -167,12 +167,13 @@ test("Test - Time Expression's Meridiem imply", function () {
 
         expect(result.end.get("year")).toBe(2012);
         expect(result.end.get("month")).toBe(8);
-        expect(result.end.get("day")).toBe(11);
-        expect(result.end.get("hour")).toBe(3);
+        expect(result.end.get("day")).toBe(10);
+        expect(result.end.get("hour")).toBe(15);
         expect(result.end.get("minute")).toBe(0);
         expect(result.end.get("second")).toBe(0);
         expect(result.end.get("millisecond")).toBe(0);
-        expect(result.end.isCertain("meridiem")).toBe(false);
+        expect(result.end.get("meridiem")).toBe(1);
+        expect(result.end.isCertain("meridiem")).toBe(true);
     });
 });
 
