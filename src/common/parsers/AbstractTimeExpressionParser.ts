@@ -1,6 +1,7 @@
 import { Parser, ParsingContext } from "../../chrono";
 import { ParsingComponents, ParsingResult } from "../../results";
 import { Meridiem } from "../../types";
+import { inferRangeMeridiem, to24Hour } from "../../calculation/meridiem";
 
 // prettier-ignore
 function primaryTimePattern(leftBoundary: string, primaryPrefix: string, primarySuffix: string, flags: string) {
@@ -270,11 +271,19 @@ export abstract class AbstractTimeExpressionParser implements Parser {
             meridiem = Meridiem.PM;
         }
 
+        // The raw hour in 1-12 form before am/pm conversion.
+        // Used for inferring the start's meridiem when the ending (e.g. "1pm")
+        // is the only side of the range carrying an explicit meridiem.
+        const startRawHour = result.start.get("hour");
+        const endRawHour = hour;
+        let endHasMeridiemToken = false;
+
         // ----- AM & PM
         if (match[AM_PM_HOUR_GROUP] != null) {
             if (hour > 12) {
                 return null;
             }
+            endHasMeridiemToken = true;
 
             const ampm = match[AM_PM_HOUR_GROUP][0].toLowerCase();
             if (ampm == "a") {
@@ -292,20 +301,13 @@ export abstract class AbstractTimeExpressionParser implements Parser {
                 if (hour != 12) hour += 12;
             }
 
-            if (!result.start.isCertain("meridiem")) {
-                if (meridiem == Meridiem.AM) {
-                    result.start.imply("meridiem", Meridiem.AM);
-
-                    if (result.start.get("hour") == 12) {
-                        result.start.assign("hour", 0);
-                    }
-                } else {
-                    result.start.imply("meridiem", Meridiem.PM);
-
-                    if (result.start.get("hour") != 12) {
-                        result.start.assign("hour", result.start.get("hour") + 12);
-                    }
-                }
+            // Only the ending has an explicit meridiem. Infer the start's
+            // meridiem so that the range becomes a short forward interval,
+            // e.g. "11 - 1pm" => 11:00 - 13:00.
+            if (!result.start.isCertain("meridiem") && startRawHour <= 12) {
+                const startMeridiem = inferRangeMeridiem(startRawHour, result.start.get("minute"), hour, minute, false);
+                result.start.assign("hour", to24Hour(startRawHour, startMeridiem));
+                result.start.imply("meridiem", startMeridiem);
             }
         }
 
@@ -314,21 +316,29 @@ export abstract class AbstractTimeExpressionParser implements Parser {
 
         if (meridiem >= 0) {
             components.assign("meridiem", meridiem);
-        } else {
-            const startAtPM = result.start.isCertain("meridiem") && result.start.get("hour") > 12;
-            if (startAtPM) {
-                if (result.start.get("hour") - 12 > hour) {
-                    // 10pm - 1 (am)
-                    components.imply("meridiem", Meridiem.AM);
-                } else if (hour <= 12) {
-                    components.assign("hour", hour + 12);
-                    components.assign("meridiem", Meridiem.PM);
-                }
-            } else if (hour > 12) {
-                components.imply("meridiem", Meridiem.PM);
-            } else if (hour <= 12) {
+        } else if (!endHasMeridiemToken && result.start.isCertain("meridiem") && endRawHour <= 12) {
+            // Only the start has an explicit meridiem. Infer the ending's
+            // meridiem so that the range becomes a short forward interval,
+            // e.g. "9am - 5" => 09:00 - 17:00, "11pm - 1" => 23:00 - 01:00.
+            const endMeridiem = inferRangeMeridiem(
+                endRawHour,
+                minute,
+                result.start.get("hour"),
+                result.start.get("minute"),
+                true
+            );
+            if (endMeridiem == Meridiem.PM) {
+                // Continuing into the afternoon/evening, e.g. "1pm - 3"
+                components.assign("hour", to24Hour(endRawHour, Meridiem.PM));
+                components.assign("meridiem", Meridiem.PM);
+            } else {
+                // Crossing into the early morning, e.g. "11pm - 3"
                 components.imply("meridiem", Meridiem.AM);
             }
+        } else if (hour > 12) {
+            components.imply("meridiem", Meridiem.PM);
+        } else if (hour <= 12) {
+            components.imply("meridiem", Meridiem.AM);
         }
 
         if (components.date().getTime() < result.start.date().getTime()) {

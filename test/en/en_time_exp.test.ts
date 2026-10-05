@@ -533,3 +533,79 @@ test("Test - Test - Forward time calculation 'forwardDate' flag in different tim
         }
     );
 });
+
+test("Test - Time range with meridiem on only one side stays a short same-day interval", function () {
+    const refDate = new Date(2024, 3 - 1, 6, 8);
+
+    testSingleCase(chrono, "11 - 1pm", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("day")).toBe(6);
+        expect(result.start.get("hour")).toBe(11);
+
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(13);
+    });
+
+    testSingleCase(chrono, "11:30 - 1pm", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(11);
+        expect(result.start.get("minute")).toBe(30);
+
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(13);
+    });
+
+    testSingleCase(chrono, "10 - 12pm", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(10);
+
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(12);
+    });
+
+    testSingleCase(chrono, "from 11 to 2pm", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("hour")).toBe(11);
+
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(14);
+    });
+
+    testSingleCase(chrono, "Friday 11 - 1pm", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("day")).toBe(8);
+        expect(result.start.get("hour")).toBe(11);
+
+        expect(result.end.get("day")).toBe(8);
+        expect(result.end.get("hour")).toBe(13);
+    });
+
+    testSingleCase(chrono, "9am - 5", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(9);
+
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(17);
+        expect(result.end.get("meridiem")).toBe(Meridiem.PM);
+    });
+
+    testSingleCase(chrono, "10 - 2am", refDate, (result) => {
+        expect(result.start.get("day")).toBe(6);
+        expect(result.start.get("hour")).toBe(22);
+        expect(result.start.get("meridiem")).toBe(Meridiem.PM);
+
+        expect(result.end.get("day")).toBe(7);
+        expect(result.end.get("hour")).toBe(2);
+        expect(result.end.get("meridiem")).toBe(Meridiem.AM);
+    });
+
+    // Previously correct cases should remain unchanged.
+    testSingleCase(chrono, "8 - 10pm", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(20);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(22);
+    });
+
+    testSingleCase(chrono, "11pm - 1", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(23);
+        expect(result.end.get("day")).toBe(7);
+        expect(result.end.get("hour")).toBe(1);
+    });
+});

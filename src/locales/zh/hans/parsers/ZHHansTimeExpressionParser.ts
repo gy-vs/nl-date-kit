@@ -1,5 +1,6 @@
 import { ParsingContext } from "../../../../chrono";
 import { AbstractParserWithWordBoundaryChecking } from "../../../../common/parsers/AbstractParserWithWordBoundary";
+import { inferRangeMeridiem, to24Hour } from "../../../../calculation/meridiem";
 import { NUMBER, zhStringToNumber } from "../constants";
 
 const FIRST_REG_PATTERN = new RegExp(
@@ -337,8 +338,14 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
             meridiem = 1;
         }
 
+        const startRawHour = result.start.get("hour");
+        const endRawHour = hour;
+        const endDayOffset = Math.round((endMoment.getTime() - startMoment.getTime()) / (24 * 60 * 60 * 1000));
+        let endHasMeridiemToken = false;
+
         // ----- AM & PM
         if (secondMatch[AM_PM_HOUR_GROUP]) {
+            endHasMeridiemToken = true;
             if (hour > 12) return null;
             const ampm = secondMatch[AM_PM_HOUR_GROUP][0].toLowerCase();
             if (ampm == "a") {
@@ -350,23 +357,8 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
                 meridiem = 1;
                 if (hour != 12) hour += 12;
             }
-
-            if (!result.start.isCertain("meridiem")) {
-                if (meridiem == 0) {
-                    result.start.imply("meridiem", 0);
-
-                    if (result.start.get("hour") == 12) {
-                        result.start.assign("hour", 0);
-                    }
-                } else {
-                    result.start.imply("meridiem", 1);
-
-                    if (result.start.get("hour") != 12) {
-                        result.start.assign("hour", result.start.get("hour") + 12);
-                    }
-                }
-            }
         } else if (secondMatch[ZH_AM_PM_HOUR_GROUP_1]) {
+            endHasMeridiemToken = true;
             const zhAMPMString1 = secondMatch[ZH_AM_PM_HOUR_GROUP_1];
             const zhAMPM1 = zhAMPMString1[0];
             if (zhAMPM1 == "早") {
@@ -377,6 +369,7 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
                 if (hour != 12) hour += 12;
             }
         } else if (secondMatch[ZH_AM_PM_HOUR_GROUP_2]) {
+            endHasMeridiemToken = true;
             const zhAMPMString2 = secondMatch[ZH_AM_PM_HOUR_GROUP_2];
             const zhAMPM2 = zhAMPMString2[0];
             if (zhAMPM2 == "上" || zhAMPM2 == "早" || zhAMPM2 == "凌") {
@@ -387,6 +380,7 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
                 if (hour != 12) hour += 12;
             }
         } else if (secondMatch[ZH_AM_PM_HOUR_GROUP_3]) {
+            endHasMeridiemToken = true;
             const zhAMPMString3 = secondMatch[ZH_AM_PM_HOUR_GROUP_3];
             const zhAMPM3 = zhAMPMString3[0];
             if (zhAMPM3 == "上" || zhAMPM3 == "早" || zhAMPM3 == "凌") {
@@ -398,11 +392,46 @@ export default class ZHHansTimeExpressionParser extends AbstractParserWithWordBo
             }
         }
 
+        // Only the ending has an explicit meridiem. Infer the start's
+        // meridiem so that the range becomes a short forward interval,
+        // e.g. "1点pm到3点" => 13:00 - 15:00.
+        if (endHasMeridiemToken && !result.start.isCertain("meridiem") && startRawHour <= 12) {
+            const startMeridiem = inferRangeMeridiem(
+                startRawHour,
+                result.start.get("minute"),
+                hour,
+                minute,
+                false,
+                -endDayOffset
+            );
+            result.start.assign("hour", to24Hour(startRawHour, startMeridiem));
+            result.start.imply("meridiem", startMeridiem);
+        }
+
         result.text = result.text + secondMatch[0];
         result.end.assign("hour", hour);
         result.end.assign("minute", minute);
         if (meridiem >= 0) {
             result.end.assign("meridiem", meridiem);
+        } else if (!endHasMeridiemToken && result.start.isCertain("meridiem") && endRawHour <= 12) {
+            // Only the start has an explicit meridiem. Infer the ending's
+            // meridiem so that the range becomes a short forward interval,
+            // e.g. "下午3点到5点" => 15:00 - 17:00.
+            const endMeridiem = inferRangeMeridiem(
+                endRawHour,
+                minute,
+                result.start.get("hour"),
+                result.start.get("minute"),
+                true,
+                endDayOffset
+            );
+            if (endMeridiem == 1) {
+                result.end.assign("hour", to24Hour(endRawHour, 1));
+                result.end.assign("meridiem", 1);
+            } else {
+                // Crossing into the early morning, e.g. "晚上11点到1点"
+                result.end.imply("meridiem", 0);
+            }
         } else {
             const startAtPM = result.start.isCertain("meridiem") && result.start.get("meridiem") == 1;
             if (startAtPM && result.start.get("hour") > hour) {

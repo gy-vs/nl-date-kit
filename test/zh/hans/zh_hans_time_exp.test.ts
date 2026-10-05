@@ -167,12 +167,13 @@ test("Test - Time Expression's Meridiem imply", function () {
 
         expect(result.end.get("year")).toBe(2012);
         expect(result.end.get("month")).toBe(8);
-        expect(result.end.get("day")).toBe(11);
-        expect(result.end.get("hour")).toBe(3);
+        expect(result.end.get("day")).toBe(10);
+        expect(result.end.get("hour")).toBe(15);
         expect(result.end.get("minute")).toBe(0);
         expect(result.end.get("second")).toBe(0);
         expect(result.end.get("millisecond")).toBe(0);
-        expect(result.end.isCertain("meridiem")).toBe(false);
+        expect(result.end.get("meridiem")).toBe(1);
+        expect(result.end.isCertain("meridiem")).toBe(true);
     });
 });
 
@@ -251,5 +252,55 @@ test("Test - YYYY-MM-DD HH:mm:ss format", function () {
         expect(result.start.get("hour")).toBe(10);
         expect(result.start.get("minute")).toBe(30);
         expect(result.start.get("second")).toBe(0);
+    });
+});
+
+test("Test - 只写一次上下午的时间区间应取当天的短区间", function () {
+    const refDate = new Date(2024, 3 - 1, 6, 8);
+
+    testSingleCase(chrono.zh.hans, "下午3点到5点", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("hour")).toBe(15);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(17);
+    });
+
+    testSingleCase(chrono.zh.hans, "下午5点-7点", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(17);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(19);
+    });
+
+    testSingleCase(chrono.zh.hans, "晚上8点到10点", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(20);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(22);
+    });
+
+    testSingleCase(chrono.zh.hans, "上午10点到2点", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(10);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(14);
+    });
+
+    testSingleCase(chrono.zh.hans, "周五下午3点到5点", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("day")).toBe(8);
+        expect(result.start.get("hour")).toBe(15);
+        expect(result.end.get("day")).toBe(8);
+        expect(result.end.get("hour")).toBe(17);
+    });
+
+    // 原本就正确的跨夜区间应保持不变。
+    testSingleCase(chrono.zh.hans, "晚上11点到1点", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(23);
+        expect(result.end.get("day")).toBe(7);
+        expect(result.end.get("hour")).toBe(1);
+    });
+
+    testSingleCase(chrono.zh.hans, "下午3点到下午5点", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(15);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(17);
     });
 });

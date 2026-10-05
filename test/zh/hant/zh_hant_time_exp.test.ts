@@ -152,12 +152,13 @@ test("Test - Time Expression's Meridiem imply", function () {
 
         expect(result.end.get("year")).toBe(2012);
         expect(result.end.get("month")).toBe(8);
-        expect(result.end.get("day")).toBe(11);
-        expect(result.end.get("hour")).toBe(3);
+        expect(result.end.get("day")).toBe(10);
+        expect(result.end.get("hour")).toBe(15);
         expect(result.end.get("minute")).toBe(0);
         expect(result.end.get("second")).toBe(0);
         expect(result.end.get("millisecond")).toBe(0);
-        expect(result.end.isCertain("meridiem")).toBe(false);
+        expect(result.end.get("meridiem")).toBe(1);
+        expect(result.end.isCertain("meridiem")).toBe(true);
     });
 });
 
@@ -192,5 +193,41 @@ test("Test - Random date + time expression", function () {
 
     testSingleCase(chrono.zh.hant, "中午12點", new Date(2012, 7, 10), (result) => {
         expect(result.start.get("hour")).toBe(12);
+    });
+});
+
+test("Test - 只寫一次上下午的時間區間應取當天的短區間", function () {
+    const refDate = new Date(2024, 3 - 1, 6, 8);
+
+    testSingleCase(chrono.zh.hant, "下午3點到5點", refDate, (result, text) => {
+        expect(result.text).toBe(text);
+        expect(result.start.get("hour")).toBe(15);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(17);
+    });
+
+    testSingleCase(chrono.zh.hant, "晚上8點到10點", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(20);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(22);
+    });
+
+    testSingleCase(chrono.zh.hant, "上午10點到2點", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(10);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(14);
+    });
+
+    // 原本就正確的跨夜區間應保持不變。
+    testSingleCase(chrono.zh.hant, "晚上11點到1點", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(23);
+        expect(result.end.get("day")).toBe(7);
+        expect(result.end.get("hour")).toBe(1);
+    });
+
+    testSingleCase(chrono.zh.hant, "下午3點到下午5點", refDate, (result) => {
+        expect(result.start.get("hour")).toBe(15);
+        expect(result.end.get("day")).toBe(6);
+        expect(result.end.get("hour")).toBe(17);
     });
 });
